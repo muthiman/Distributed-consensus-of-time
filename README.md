@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-This project implements a decentralized, Byzantine Fault Tolerant (BFT) time synchronization system. It combines concepts from various distributed timekeeping protocols to create a robust, scalable, and accurate timekeeping mechanism without relying on a central authority.
+This project implements a decentralised, Byzantine Fault Tolerant (BFT) time synchronisation system. It combines concepts from various distributed timekeeping protocols to create a robust, scalable, and accurate timekeeping mechanism without relying on a central authority.
 
 ## 2. Core Components and Design Considerations
 
@@ -63,9 +63,9 @@ def send_time_request(self, peer):
 
 **Design Consideration**: A gossip protocol was chosen for its scalability and robustness. It allows information to propagate through the network without requiring all-to-all communication, making it suitable for large-scale deployments. The hybrid push-pull approach balances proactive information sharing with the ability to request updates when needed.
 
-### 2.4 Time Synchronization Process
+### 2.4 Time Synchronisation Process
 
-Our time synchronization process involves a four-timestamp mechanism:
+Our time synchronisation process involves a four-timestamp mechanism:
 
 1. Node A sends request with t1
 2. Node B receives at t2, responds with t1, t2, t3, and its current time
@@ -89,7 +89,7 @@ def handle_time_response(self, message, addr):
     self.update_hlc(tuple(message["payload"]["hlc"]))
 ```
 
-**Design Consideration**: This approach, inspired by NTP, allows us to estimate and compensate for network latency, improving the accuracy of our time synchronization. The trade-off is increased complexity in the protocol and slightly higher bandwidth usage.
+**Design Consideration**: This approach, inspired by NTP, allows us to estimate and compensate for network latency, improving the accuracy of our time synchronisation. The trade-off is increased complexity in the protocol and slightly higher bandwidth usage.
 
 ### 2.5 Byzantine Fault Tolerance
 
@@ -174,7 +174,7 @@ def get_current_time(self):
 
 ## 5. Key Methods
 
-- `gossip_time()`: Initiates time synchronization with peers
+- `gossip_time()`: Initiates time synchronisation with peers
 - `send_time_request(peer)`: Sends a time request to a specific peer
 - `handle_time_request(message, addr)`: Processes incoming time requests
 - `handle_time_response(message, addr)`: Processes time responses and updates local time
@@ -197,12 +197,12 @@ python advanced_zk_clock_client.py <host> <port> [<known_peer_host:port>]
 
 2. **Fault Detection**: We currently lack a mechanism for detecting and excluding consistently faulty nodes. This could be added to improve long-term stability.
 
-3. **Network Topology**: Our gossip protocol could be optimized for different network topologies to improve efficiency in various deployment scenarios.
+3. **Network Topology**: Our gossip protocol could be optimised for different network topologies to improve efficiency in various deployment scenarios.
 
-4. **Visualization**: Adding tools for visualizing network state and time convergence would aid in monitoring and debugging.
+4. **Visualisation**: Adding tools for visualising network state and time convergence would aid in monitoring and debugging.
 
-5. **Performance Optimizations**: Implementing various optimizations, such as batching updates or using more efficient data structures, could improve performance in large-scale deployments.
+5. **Performance Optimisations**: Implementing various optimisations, such as batching updates or using more efficient data structures, could improve performance in large-scale deployments.
 
 ## 8. Conclusion
 
-Our distributed time synchronization system combines concepts from various distributed systems to provide a robust, scalable, and accurate timekeeping mechanism. It demonstrates key concepts in distributed systems including Byzantine fault tolerance, gossip protocols, and hybrid logical clocks. While there's room for further refinement, this implementation provides a solid foundation for applications requiring distributed time synchronization and serves as an excellent starting point for exploring advanced concepts in distributed systems.
+Our distributed time synchronisation system combines concepts from various distributed systems to provide a robust, scalable, and accurate timekeeping mechanism. It demonstrates key concepts in distributed systems including Byzantine fault tolerance, gossip protocols, and hybrid logical clocks. While there's room for further refinement, this implementation provides a solid foundation for applications requiring distributed time synchronisation and serves as an excellent starting point for exploring advanced concepts in distributed systems.
