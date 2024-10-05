@@ -1,4 +1,4 @@
-# Distributed Time Synchronization System
+# Distributed consensus of synchronised time
 
 ## 1. System Overview
 
