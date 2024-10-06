@@ -1,208 +1,140 @@
-# Distributed consensus of synchronised time
+Distributed Consensus of Synchronised Time
+1. System Overview
+This project implements a decentralized, Byzantine Fault Tolerant (BFT) time synchronization system using GPS as a primary time source. It combines concepts from various distributed timekeeping protocols to create a robust, scalable, and accurate timekeeping mechanism without relying on a central authority.
+2. Core Components and Design Considerations
+2.1 GPS Module
+The GPS module interfaces with actual GPS hardware to obtain highly accurate time:
+pythonCopyclass GpsModule:
+    def __init__(self, port: str):
+        self.port = port
 
-## 1. System Overview
+    async def get_time_data(self) -> GpsData:
+        # Interface with GPS hardware
+        # Implement anti-spoofing checks
+        # Return GPS time and satellite data
+Design Consideration: Using GPS provides a highly accurate external time source. Implementing anti-spoofing measures ensures the integrity of the time data.
+2.2 High-Precision Oscillator
+A temperature-compensated crystal oscillator (TCXO) maintains stable time between GPS synchronizations:
+pythonCopyclass HighPrecisionOscillator:
+    def __init__(self):
+        self.start_time = time.time()
+        self.offset = 0
 
-This project implements a decentralised, Byzantine Fault Tolerant (BFT) time synchronisation system. It combines concepts from various distributed timekeeping protocols to create a robust, scalable, and accurate timekeeping mechanism without relying on a central authority.
+    def get_time(self) -> float:
+        return time.time() - self.start_time + self.offset
 
-## 2. Core Components and Design Considerations
+    def set_offset(self, offset: float):
+        self.offset = offset
+Design Consideration: The TCXO provides a stable time base, reducing drift between GPS synchronizations.
+2.3 Timekeeping Unit
+Combines GPS time and local oscillator data:
+pythonCopyclass TimekeepingUnit:
+    def __init__(self, gps_module: GpsModule, oscillator: HighPrecisionOscillator):
+        self.gps_module = gps_module
+        self.oscillator = oscillator
+        self.last_sync = 0
+        self.sync_interval = 900  # 15 minutes
 
-### 2.1 Time Representation
+    async def synchronize(self):
+        gps_data = await self.gps_module.get_time_data()
+        gps_time = gps_data.gps_week * 604800 + gps_data.gps_seconds
+        local_time = self.oscillator.get_time()
+        offset = gps_time - local_time
+        self.oscillator.set_offset(offset)
+        self.last_sync = local_time
+Design Consideration: Regular synchronization with GPS time corrects for oscillator drift, maintaining high accuracy.
+2.4 Proof Generator
+Creates cryptographic proofs of the current time:
+pythonCopyclass ProofGenerator:
+    def __init__(self, timekeeping_unit: TimekeepingUnit, secure_element: SecureElement):
+        self.timekeeping_unit = timekeeping_unit
+        self.secure_element = secure_element
+        self.last_proof_hash = '0' * 64
+        self.proof_interval = 60  # 1 minute
 
-Our system uses a multi-faceted approach to time representation:
+    async def generate_proof(self) -> TimeProof:
+        gps_data = await self.timekeeping_unit.gps_module.get_time_data()
+        local_time = self.timekeeping_unit.get_current_time()
+        oscillator_offset = self.timekeeping_unit.oscillator.offset
+        nonce = os.urandom(32).hex()
 
-- **Physical Clock**: Unix timestamp (seconds since epoch)
-- **Logical Clock**: Monotonically increasing integer
-- **Hybrid Logical Clock (HLC)**: Tuple (physical_time, logical_time, node_id)
+        proof = TimeProof(
+            node_id=self.secure_element.node_id,
+            gps_data=gps_data,
+            local_time=local_time,
+            oscillator_offset=oscillator_offset,
+            previous_proof_hash=self.last_proof_hash,
+            nonce=nonce,
+            signature=''
+        )
 
-```python
-self.physical_clock = time.time()
-self.logical_clock = 0
-self.hlc = (self.physical_clock, 0, f"{host}:{port}")
-```
+        proof_hash = hashlib.sha3_256(str(proof).encode()).hexdigest()
+        proof.signature = self.secure_element.sign(proof_hash)
 
-**Design Consideration**: We chose to use Hybrid Logical Clocks to maintain a causal ordering of events while staying close to physical time. This allows our system to provide both logical consistency and reasonable real-time approximation, which is crucial for distributed systems that require both properties.
+        return proof
+Design Consideration: Cryptographic proofs ensure the integrity and authenticity of time claims.
+2.5 Network Interface
+Handles P2P communication and interaction with the Data Availability Layer:
+pythonCopyclass NetworkInterface:
+    def __init__(self, p2p_port: int, da_layer_url: str):
+        self.p2p_port = p2p_port
+        self.da_layer_url = da_layer_url
+        self.peers: List[str] = []
 
-### 2.2 Network Communication
+    async def submit_proof(self, proof: TimeProof):
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{self.da_layer_url}/submit_proof", json=proof.to_dict()) as response:
+                return await response.json()
 
-We use UDP for network communication, with JSON-encoded messages signed using HMAC-SHA256.
+    async def get_recent_proofs(self) -> List[Dict]:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{self.da_layer_url}/get_recent_proofs") as response:
+                return await response.json()
+Design Consideration: Separating network operations allows for efficient handling of communication and data availability tasks.
+2.6 Consensus Engine
+Implements Byzantine Fault Tolerant consensus:
+pythonCopyclass ConsensusEngine:
+    def __init__(self, network: NetworkInterface):
+        self.network = network
 
-```python
-self.send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-self.recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-self.recv_sock.bind((host, port))
-```
+    async def reach_consensus(self) -> float:
+        proofs = await self.network.get_recent_proofs()
+        valid_proofs = self.filter_valid_proofs(proofs)
+        return self.calculate_median_time(valid_proofs)
 
-**Design Consideration**: UDP was chosen for its low overhead and stateless nature, which is beneficial in a distributed system where nodes may come and go. The trade-off is that we need to handle potential message loss at the application level.
+    def calculate_median_time(self, proofs: List[TimeProof]) -> float:
+        times = sorted(proof.local_time for proof in proofs)
+        mid = len(times) // 2
+        return (times[mid] + times[~mid]) / 2
+Design Consideration: The median-based approach provides robustness against Byzantine faults without requiring 3f+1 nodes.
+3. Security Measures
 
-#### 2.2.1 Distinct Send and Receive Channels
+GPS anti-spoofing techniques
+Cryptographic proofs using SHA3-256 and SPHINCS+ for post-quantum security
+Secure element (e.g., ATECC608A) for key storage and operations
 
-We implement separate sockets for sending and receiving:
+4. Uncertainty Handling
+Time is represented as an interval to account for uncertainty:
+pythonCopydef get_current_time(self) -> Tuple[float, float]:
+    current_time = self.timekeeping_unit.get_current_time()
+    uncertainty = self.calculate_uncertainty()
+    return (current_time - uncertainty, current_time + uncertainty)
+5. Key Methods
 
-- **Send Channel**: `self.send_sock`
-  - Used by: `gossip_time()`, `send_time_request()`, `join_network()`
-- **Receive Channel**: `self.recv_sock`
-  - Used by: `receive_messages()`
+synchronize_gps(): Synchronizes local time with GPS
+generate_and_submit_proof(): Creates and submits a time proof
+validate_action(action): Checks if an action's timestamp is valid
+reach_consensus(): Determines the consensus time across the network
 
-**Design Consideration**: This separation allows for non-blocking communication and clearer separation of concerns. It enables the system to continuously listen for incoming messages while simultaneously sending out requests and responses.
-
-### 2.3 Gossip Protocol
-
-We implement a hybrid push-pull gossip protocol:
-
-```python
-def gossip_time(self):
-    for peer in self.peers:
-        self.send_time_request(peer)
-
-def send_time_request(self, peer):
-    request = self.create_signed_message("time_request", {
-        "t1": time.time()
-    })
-    self.send_sock.sendto(request.encode(), peer)
-```
-
-**Design Consideration**: A gossip protocol was chosen for its scalability and robustness. It allows information to propagate through the network without requiring all-to-all communication, making it suitable for large-scale deployments. The hybrid push-pull approach balances proactive information sharing with the ability to request updates when needed.
-
-### 2.4 Time Synchronisation Process
-
-Our time synchronisation process involves a four-timestamp mechanism:
-
-1. Node A sends request with t1
-2. Node B receives at t2, responds with t1, t2, t3, and its current time
-3. Node A receives at t4, calculates RTT and offset
-
-```python
-def handle_time_response(self, message, addr):
-    t4 = time.time()
-    t1 = message["payload"]["t1"]
-    t2 = message["payload"]["t2"]
-    t3 = message["payload"]["t3"]
-    
-    rtt = (t4 - t1) - (t3 - t2)
-    offset = ((t2 - t1) + (t3 - t4)) / 2
-
-    self.peer_latencies[addr] = rtt / 2
-    adjusted_time = message["payload"]["physical_clock"] + offset + (rtt / 2)
-
-    self.time_window.append((adjusted_time, addr))
-    self.update_local_time()
-    self.update_hlc(tuple(message["payload"]["hlc"]))
-```
-
-**Design Consideration**: This approach, inspired by NTP, allows us to estimate and compensate for network latency, improving the accuracy of our time synchronisation. The trade-off is increased complexity in the protocol and slightly higher bandwidth usage.
-
-### 2.5 Byzantine Fault Tolerance
-
-We implement Byzantine Fault Tolerance using a median-based approach:
-
-```python
-def update_local_time(self):
-    if len(self.time_window) >= 2 * self.fault_tolerance + 1:
-        sorted_times = sorted(self.time_window, key=lambda x: x[0])
-        median_time = sorted_times[len(sorted_times) // 2][0]
-        
-        weight = 0.8
-        self.physical_clock = (weight * self.physical_clock) + ((1 - weight) * median_time)
-        
-        self.logical_clock += 1
-        self.hlc = (self.physical_clock, self.logical_clock, f"{self.host}:{self.port}")
-```
-
-**Design Consideration**: The median-based approach allows the system to tolerate up to f faulty nodes in a 2f+1 system. This provides robust fault tolerance without requiring the higher node counts of traditional BFT systems (which typically require 3f+1 nodes).
-
-### 2.6 Hybrid Logical Clock Update
-
-Our HLC update ensures a total ordering of events while staying close to real time:
-
-```python
-def update_hlc(self, received_hlc):
-    with self.lock:
-        local_physical = time.time()
-        msg_physical, msg_logical, _ = received_hlc
-        if local_physical > msg_physical:
-            self.hlc = (local_physical, 0, f"{self.host}:{self.port}")
-        elif local_physical == msg_physical:
-            self.hlc = (local_physical, max(self.hlc[1], msg_logical) + 1, f"{self.host}:{self.port}")
-        else:
-            self.hlc = (msg_physical, msg_logical + 1, f"{self.host}:{self.port}")
-```
-
-**Design Consideration**: HLCs provide a balance between the strict happened-before relationships of logical clocks and the real-time ordering of physical clocks. This makes them suitable for distributed systems that need both causal consistency and reasonable real-time approximation.
-
-## 3. Security Measures
-
-We implement message signing and verification:
-
-```python
-def create_signed_message(self, message_type, payload):
-    message = {
-        "type": message_type,
-        "sender": f"{self.host}:{self.port}",
-        "hlc": self.hlc,
-        "payload": payload,
-        "timestamp": time.time()
-    }
-    message_str = json.dumps(message, sort_keys=True)
-    signature = hmac.new(self.secret_key.encode(), message_str.encode(), hashlib.sha256).hexdigest()
-    message["signature"] = signature
-    return json.dumps(message)
-
-def verify_message(self, message):
-    signature = message.pop("signature", None)
-    if not signature:
-        return False
-    message_str = json.dumps(message, sort_keys=True)
-    expected_signature = hmac.new(self.secret_key.encode(), message_str.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature, expected_signature)
-```
-
-**Design Consideration**: Message signing ensures the authenticity and integrity of all communications, preventing tampering and impersonation attacks. The use of HMAC-SHA256 provides a good balance of security and performance.
-
-## 4. Uncertainty Handling
-
-We represent time as an interval to account for uncertainty:
-
-```python
-def get_current_time(self):
-    with self.lock:
-        lower_bound = max(self.physical_clock, self.hlc[0]) - self.uncertainty_window
-        upper_bound = max(self.physical_clock, self.hlc[0]) + self.uncertainty_window
-        return (lower_bound, upper_bound)
-```
-
-**Design Consideration**: By representing time as an interval, we acknowledge the inherent uncertainty in distributed timekeeping. This allows applications built on our system to make informed decisions based on the level of time uncertainty.
-
-## 5. Key Methods
-
-- `gossip_time()`: Initiates time synchronisation with peers
-- `send_time_request(peer)`: Sends a time request to a specific peer
-- `handle_time_request(message, addr)`: Processes incoming time requests
-- `handle_time_response(message, addr)`: Processes time responses and updates local time
-- `update_local_time()`: Calculates and applies time updates based on peer data
-- `get_current_time()`: Returns the current time with uncertainty bounds
-- `receive_messages()`: Main loop for processing incoming messages
-- `join_network(known_peer)`: Procedure for a new node to join the network
-
-## 6. Usage
-
+6. Usage
 To run a node:
+bashCopypython run_node.py --config config.yaml
+7. Future Improvements
 
-```bash
-python advanced_zk_clock_client.py <host> <port> [<known_peer_host:port>]
-```
+Implement Verifiable Delay Functions (VDFs) for proof-of-elapsed-time
+Explore quantum key distribution for ultra-secure communication
+Implement BLS signature aggregation for more efficient consensus
+Develop visualization tools for network state and time convergence
 
-## 7. Limitations and Future Improvements
-
-1. **Asymmetric Latencies**: Our current implementation assumes symmetric network latencies. Future versions could implement more sophisticated latency estimation techniques.
-
-2. **Fault Detection**: We currently lack a mechanism for detecting and excluding consistently faulty nodes. This could be added to improve long-term stability.
-
-3. **Network Topology**: Our gossip protocol could be optimised for different network topologies to improve efficiency in various deployment scenarios.
-
-4. **Visualisation**: Adding tools for visualising network state and time convergence would aid in monitoring and debugging.
-
-5. **Performance Optimisations**: Implementing various optimisations, such as batching updates or using more efficient data structures, could improve performance in large-scale deployments.
-
-## 8. Conclusion
-
-Our distributed time synchronisation system combines concepts from various distributed systems to provide a robust, scalable, and accurate timekeeping mechanism. It demonstrates key concepts in distributed systems including Byzantine fault tolerance, gossip protocols, and hybrid logical clocks. While there's room for further refinement, this implementation provides a solid foundation for applications requiring distributed time synchronisation and serves as an excellent starting point for exploring advanced concepts in distributed systems.
+8. Conclusion
+This distributed time synchronization system provides a robust, scalable, and accurate timekeeping mechanism. It demonstrates advanced concepts in distributed systems, including GPS integration, Byzantine fault tolerance, and cryptographic time proofs. The modular design allows for easy extension and improvement, making it an excellent foundation for applications requiring highly precise, tamper-resistant distributed time synchronization.
