@@ -1,5 +1,3 @@
-Certainly. I'll incorporate these important details into an expanded and refined README, ensuring to capture the unique aspects of your system design.
-
 # Distributed Consensus of Synchronised Time (DCST)
 
 ## Table of Contents
